@@ -15,7 +15,7 @@ class TikTokDownloaderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("TikTok Video Downloader")
-        self.root.geometry("760x520")
+        self.root.geometry("900x720")
         self.root.minsize(720, 480)
         self.root.configure(bg="#0f172a")
 
@@ -58,6 +58,7 @@ class TikTokDownloaderApp:
         subtitle.pack(anchor="w", pady=(0, 20))
 
         url_frame = ttk.LabelFrame(container, text="Liên kết video", padding=12)
+        # xử lý chiều rộng của khung liên kết video để phù hợp với kích thước cửa sổ
         url_frame.pack(fill=tk.X, pady=(0, 12))
 
         ttk.Entry(url_frame, textvariable=self.url_var, font=("Segoe UI", 11)).pack(fill=tk.X)
@@ -112,7 +113,12 @@ class TikTokDownloaderApp:
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill=tk.X)
 
-        status_frame = ttk.LabelFrame(container, text="Trạng thái", padding=12, height=60)
+        # code xử lý hiển thị trạng thái tải xuống và thông báo lỗi nếu có
+        status_frame = ttk.LabelFrame(
+            container, 
+            text="Trạng thái", 
+            padding=12
+            )
         status_frame.pack(fill=tk.BOTH, expand=True)
         ttk.Label(status_frame, textvariable=self.status_var, font=("Segoe UI", 10), foreground="#0f766e").pack(anchor="w")
 
