@@ -120,7 +120,12 @@ class TikTokDownloaderApp:
             padding=12
             )
         status_frame.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(status_frame, textvariable=self.status_var, font=("Segoe UI", 10), foreground="#0f766e").pack(anchor="w")
+        # thông báo trạng thái được hiển thị bằng ttk.Label với font chữ Segoe UI, màu chữ #0f766e
+        ttk.Label(status_frame,
+                   textvariable=self.status_var,
+                    font=("Segoe UI", 25, "bold"),
+                    # màu chữ và căn giữa được đặt để hiển thị rõ ràng trạng thái tải xuống
+                     foreground="#0f766e").pack(anchor="center")
 
         self.root.bind("<Return>", lambda event: self.start_download())
 
