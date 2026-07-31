@@ -50,7 +50,7 @@ def open_file_in_explorer(filepath: str) -> None:
 class TikTokDownloaderApp:
     def __init__(self, root: ctk.CTk) -> None:
         self.root = root
-        self.root.title("TikTok & Douyin Downloader Pro v3.0 Ultimate")
+        self.root.title("TikTok & Douyin Downloader Pro by Delwynaa ver 1.0")
         self.root.geometry("920x760")
         self.root.minsize(760, 560)
         self.root.configure(fg_color="#0f172a")
@@ -116,7 +116,7 @@ class TikTokDownloaderApp:
 
         subtitle_label = ctk.CTkLabel(
             header_frame,
-            text="Tải nhanh video đơn/toàn bộ kênh tác giả • Phân loại thư mục kênh • Sắp xếp theo ngày đăng",
+            text="Tải nhanh video đơn/kênh tác giả • Hỗ trợ khôi phục tải gián đoạn • Nhúng Cover Art MP3",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color="#94a3b8",
         )
@@ -279,7 +279,7 @@ class TikTokDownloaderApp:
         # ---------------- SMART PREVIEW CARD (Ẩn mặc định) ----------------
         self.card_preview = ctk.CTkFrame(main_container, corner_radius=14, fg_color="#1e293b", border_width=1, border_color="#0284c7")
 
-        self.img_label = ctk.CTkLabel(self.card_preview, text="", width=120, height=80)
+        self.img_label = ctk.CTkLabel(self.card_preview, text="")
         self.img_label.pack(side="left", padx=12, pady=10)
 
         preview_info = ctk.CTkFrame(self.card_preview, fg_color="transparent")
@@ -562,8 +562,17 @@ class TikTokDownloaderApp:
                             req = urllib.request.Request(info["thumbnail_url"], headers=headers)
                             with urllib.request.urlopen(req, timeout=5) as resp:
                                 raw_img = Image.open(io.BytesIO(resp.read()))
-                                ctk_img = ctk.CTkImage(light_image=raw_img, dark_image=raw_img, size=(120, 80))
-                                self.img_label.configure(image=ctk_img, text="")
+                                orig_w, orig_h = raw_img.size
+                                if orig_w > 0 and orig_h > 0:
+                                    max_w, max_h = 130, 150
+                                    ratio = min(max_w / orig_w, max_h / orig_h)
+                                    new_w = max(1, int(orig_w * ratio))
+                                    new_h = max(1, int(orig_h * ratio))
+                                else:
+                                    new_w, new_h = 110, 140
+
+                                ctk_img = ctk.CTkImage(light_image=raw_img, dark_image=raw_img, size=(new_w, new_h))
+                                self.img_label.configure(image=ctk_img, text="", width=new_w, height=new_h)
                         except Exception:
                             pass
                     self.status_var.set("✅ Đã trích xuất thông tin xem trước!")
@@ -571,12 +580,16 @@ class TikTokDownloaderApp:
                 elif msg_type == "success":
                     result, media_label = data
                     self.progress_bar.set(1.0)
-                    self.status_var.set(f"✅ Hoàn tất: {result['file_name']}")
+                    msg_txt = f"✅ Hoàn tất: {result['file_name']}"
+                    if result.get("already_existed"):
+                        msg_txt = f"⏩ Đã tồn tại: {result['file_name']}"
+
+                    self.status_var.set(msg_txt)
                     self.btn_download.configure(state="normal", text="⚡ TẢI NGAY")
 
                     ans = messagebox.askyesno(
                         "Tải Thành Công!",
-                        f"{media_label.capitalize()} {self.platform_var.get()} đã được lưu thành công tại:\n\n{result['output_path']}\n\nBạn có muốn mở thư mục chứa tệp ngay không?",
+                        f"{media_label.capitalize()} {self.platform_var.get()} đã sẵn sàng tại:\n\n{result['output_path']}\n\nBạn có muốn mở thư mục chứa tệp ngay không?",
                     )
                     if ans:
                         open_file_in_explorer(result["output_path"])
@@ -596,7 +609,7 @@ class TikTokDownloaderApp:
 
                     ans = messagebox.askyesno(
                         "Tải Kênh Thành Công!",
-                        f"Đã tải thành công {success_count}/{total_count} video từ kênh {username}!\n\nTất cả video đã được sắp xếp theo ngày đăng và lưu tại thư mục riêng:\n{channel_dir_path}\n\nBạn có muốn mở thư mục {username} ngay không?",
+                        f"Đã hoàn tất {success_count}/{total_count} video từ kênh {username}!\n\nTất cả video đã được tự động nối tải dở dang và sắp xếp theo ngày đăng tại:\n{channel_dir_path}\n\nBạn có muốn mở thư mục {username} ngay không?",
                     )
                     if ans:
                         open_file_in_explorer(channel_dir_path)
@@ -718,7 +731,7 @@ class TikTokDownloaderApp:
 
                     try:
                         if download_audio_only:
-                            download_audio(
+                            res = download_audio(
                                 item_url,
                                 str(target_channel_dir),
                                 quality=self.quality_var.get(),
@@ -726,7 +739,7 @@ class TikTokDownloaderApp:
                                 upload_date=item_date,
                             )
                         else:
-                            download_video(
+                            res = download_video(
                                 item_url,
                                 str(target_channel_dir),
                                 quality=self.quality_var.get(),
@@ -734,6 +747,10 @@ class TikTokDownloaderApp:
                                 remove_watermark_flag=self.remove_watermark_var.get(),
                                 upload_date=item_date,
                             )
+
+                        if res and res.get("already_existed"):
+                            self.msg_queue.put(("status", f"⏩ Đã tồn tại: [{idx}/{total}] {item.get('title', '')[:25]}"))
+
                         success_count += 1
                     except Exception:
                         continue
