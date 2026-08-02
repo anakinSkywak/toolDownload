@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -16,6 +16,61 @@ import yt_dlp
 
 
 # Tìm đường dẫn ffmpeg khả dụng (hệ thống hoặc thư mục đính kèm)
+def _ensure_ffmpeg_executable() -> Optional[str]:
+    """Tự động kiểm tra và giải nén/tải xuống ffmpeg.exe nếu hệ thống chưa có."""
+    base_dir = Path(__file__).resolve().parent
+    bin_dir = base_dir / "bin"
+    target_ffmpeg = bin_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+
+    if target_ffmpeg.exists() and target_ffmpeg.stat().st_size > 0:
+        return str(target_ffmpeg)
+
+    # Thử giải nén từ file zip local nếu sẵn có
+    zip_path = base_dir / "ffmpeg-tools-2025-01-01-git-d3aa99a4f4.zip"
+    if zip_path.exists():
+        try:
+            import zipfile
+            with zipfile.ZipFile(zip_path, "r") as z:
+                for member in z.namelist():
+                    if member.endswith("ffmpeg.exe") or member.endswith("ffmpeg"):
+                        bin_dir.mkdir(parents=True, exist_ok=True)
+                        with z.open(member) as source, open(target_ffmpeg, "wb") as target:
+                            shutil.copyfileobj(source, target)
+                        if target_ffmpeg.exists() and target_ffmpeg.stat().st_size > 0:
+                            return str(target_ffmpeg)
+        except Exception:
+            pass
+
+    # Tải xuống binary ffmpeg tĩnh đơn vị từ GitHub release chính thức của yt-dlp
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+        temp_download = bin_dir / "ffmpeg_download.tmp"
+        temp_zip = bin_dir / "ffmpeg_download.zip"
+        try:
+            if not temp_zip.exists():
+                urllib.request.urlretrieve(url, temp_download)
+                temp_download.rename(temp_zip)
+            import zipfile
+            try:
+                with zipfile.ZipFile(temp_zip, "r") as z:
+                    for member in z.namelist():
+                        if member.endswith("ffmpeg.exe"):
+                            with z.open(member) as source, open(target_ffmpeg, "wb") as target:
+                                shutil.copyfileobj(source, target)
+                            break
+            except zipfile.BadZipFile:
+                temp_zip.unlink(missing_ok=True)
+                temp_download.unlink(missing_ok=True)
+            temp_zip.unlink(missing_ok=True)
+            if target_ffmpeg.exists() and target_ffmpeg.stat().st_size > 0:
+                return str(target_ffmpeg)
+        except Exception:
+            temp_download.unlink(missing_ok=True)
+
+    return None
+
+
 def _get_ffmpeg_path() -> Optional[str]:
     system_ffmpeg = shutil.which("ffmpeg")
     if system_ffmpeg:
@@ -28,13 +83,27 @@ def _get_ffmpeg_path() -> Optional[str]:
         base_dir / "ffmpeg-tools-2025-01-01-git-d3aa99a4f4" / "bin" / "ffmpeg.exe",
     ]
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.exists() and candidate.stat().st_size > 0:
             return str(candidate)
+
+    auto_ffmpeg = _ensure_ffmpeg_executable()
+    if auto_ffmpeg and Path(auto_ffmpeg).exists():
+        return auto_ffmpeg
+
     return None
 
 
-# Đảm bảo yt-dlp được cập nhật lên phiên bản mới nhất bằng sys.executable
+# Đảm bảo yt-dlp được cập nhật lên phiên bản mới nhất bằng sys.executable (cache 24h)
 def _ensure_latest_ytdlp() -> None:
+    cache_file = Path.home() / ".ytdlp_last_update"
+    try:
+        if cache_file.exists():
+            last_check = float(cache_file.read_text().strip() or "0")
+            if time.time() - last_check < 86400:  # 24 giờ
+                return
+    except Exception:
+        pass
+
     try:
         subprocess.run(
             [
@@ -49,20 +118,24 @@ def _ensure_latest_ytdlp() -> None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
+        try:
+            cache_file.write_text(str(time.time()))
+        except Exception:
+            pass
     except Exception:
         pass
 
 
-class _SilentLogger:
-    def debug(self, msg: str) -> None:
-        pass
-
-    def warning(self, msg: str) -> None:
-        pass
-
-    def error(self, msg: str) -> None:
-        pass
+def _http_get(url: str, timeout: int = 10, headers: Optional[dict] = None) -> bytes:
+    req_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(url, headers=req_headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
 
 
 # Regex linh hoạt hỗ trợ nhiều định dạng URL TikTok và Douyin (bao gồm m.tiktok, vt.tiktok, vm.tiktok, photo, v.douyin)
@@ -305,7 +378,7 @@ def embed_mp3_metadata(mp3_path: str, title: str, artist: str, image_url: Option
             try:
                 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
                 req = urllib.request.Request(image_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=4) as resp:
                     img_data = resp.read()
                     audio.tags.add(
                         APIC(
@@ -407,7 +480,11 @@ def _build_base_download_options(
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{sanitize_filename(title or 'tiktok_video')}.%(ext)s"
+    if title:
+        filename = f"{sanitize_filename(title)}.%(ext)s"
+    else:
+        filename = "%(title).100s_%(id)s.%(ext)s"
+
     http_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
@@ -431,7 +508,6 @@ def _build_base_download_options(
         "extractor_retries": 5,
         "extract_flat": False,
         "skip_download": False,
-        "logger": _SilentLogger(),
     }
 
     ffmpeg_path = _get_ffmpeg_path()
@@ -464,13 +540,13 @@ def build_video_download_options(
 ) -> dict:
     options = _build_base_download_options(output_dir, title, quality, platform)
     if quality == "best":
-        options["format"] = "bestvideo+bestaudio/best[ext=mp4]/best"
+        options["format"] = "best[ext=mp4]/bestvideo+bestaudio/best"
     elif quality == "high":
-        options["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080][ext=mp4]/best"
+        options["format"] = "best[ext=mp4][height<=1080]/bestvideo[height<=1080]+bestaudio/best"
     elif quality == "medium":
-        options["format"] = "bestvideo[height<=720]+bestaudio/best[height<=720][ext=mp4]/best"
+        options["format"] = "best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best"
     else:
-        options["format"] = "bestvideo+bestaudio/best[ext=mp4]/best"
+        options["format"] = "best[ext=mp4]/bestvideo+bestaudio/best"
 
     ffmpeg_path = _get_ffmpeg_path()
     if ffmpeg_path:
@@ -510,6 +586,27 @@ def build_audio_download_options(
     return options
 
 
+def convert_video_to_mp3(input_video: Path, output_mp3: Path) -> bool:
+    """Chuyển đổi video sang tệp MP3 chuẩn bằng FFmpeg."""
+    ffmpeg_path = _get_ffmpeg_path()
+    if not ffmpeg_path:
+        return False
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(input_video),
+        "-vn",
+        "-acodec",
+        "libmp3lame",
+        "-ab",
+        "192k",
+        str(output_mp3),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+    return completed.returncode == 0 and output_mp3.exists() and output_mp3.stat().st_size > 0
+
+
 def download_audio(
     url: str,
     output_dir: str,
@@ -528,13 +625,15 @@ def download_audio(
 
     _ensure_latest_ytdlp()
 
-    # Giải mã trực tiếp nếu là Douyin (có hỗ trợ Resume tệp dở dang)
+    # Giải mã trực tiếp nếu là Douyin (hỗ trợ chuyển đổi sang MP3 + nhúng ID3 Tag)
     if platform == "douyin":
         try:
             title, direct_url = resolve_douyin_direct(cleaned_url)
             clean_title = sanitize_filename(title)
             date_prefix = f"[{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}]_" if upload_date and len(upload_date) == 8 else ""
-            target_path = output_dir_path / f"{date_prefix}{clean_title}.m4a"
+            
+            ffmpeg_path = _get_ffmpeg_path()
+            target_path = output_dir_path / f"{date_prefix}{clean_title}.mp3"
 
             if target_path.exists() and target_path.stat().st_size > 0:
                 return {
@@ -545,7 +644,21 @@ def download_audio(
                     "already_existed": True,
                 }
 
-            download_direct_stream_with_resume(direct_url, target_path)
+            temp_video = output_dir_path / f".tmp_douyin_{clean_title}.mp4"
+            try:
+                download_direct_stream_with_resume(direct_url, temp_video)
+
+                if temp_video.exists() and temp_video.stat().st_size > 0:
+                    if ffmpeg_path and convert_video_to_mp3(temp_video, target_path):
+                        embed_mp3_metadata(str(target_path), title, "Douyin Creator", None)
+                    else:
+                        raise RuntimeError("Cần FFmpeg để trích xuất âm thanh MP3 từ Douyin.")
+            finally:
+                if temp_video.exists():
+                    try:
+                        temp_video.unlink()
+                    except Exception:
+                        pass
 
             if target_path.exists() and target_path.stat().st_size > 0:
                 return {
@@ -557,76 +670,80 @@ def download_audio(
         except Exception:
             pass
 
+    options = build_audio_download_options(str(output_dir_path), quality=quality, platform=platform)
+    if progress_hook is not None:
+        options["progress_hooks"] = [progress_hook]
+
     candidates = get_candidate_urls(url, platform)
+    info = None
+    downloaded_file = None
+    last_error = None
     thumbnail_url = None
     author_name = "TikTok Creator"
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        options = build_audio_download_options(temp_dir, quality=quality, platform=platform)
-        if progress_hook is not None:
-            options["progress_hooks"] = [progress_hook]
+    for candidate_url in candidates:
+        try:
+            with yt_dlp.YoutubeDL(options) as downloader:
+                info = downloader.extract_info(candidate_url, download=True)
+                if info:
+                    prepared_filename = downloader.prepare_filename(info)
+                    downloaded_file = Path(prepared_filename)
+                    thumbnail_url = info.get("thumbnail")
+                    author_name = info.get("uploader") or info.get("uploader_id") or "TikTok Creator"
 
-        info = None
-        temp_file = None
-        last_error = None
+                    if not downloaded_file.exists():
+                        for ext in [".mp3", ".m4a", ".aac", ".wav", ".mp4"]:
+                            variant = downloaded_file.with_suffix(ext)
+                            if variant.exists():
+                                downloaded_file = variant
+                                break
 
-        for candidate_url in candidates:
+                    if not downloaded_file or not downloaded_file.exists():
+                        found = locate_downloaded_file(str(output_dir_path), info.get("title"))
+                        if found:
+                            downloaded_file = found
+                    break
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if not info or not downloaded_file or not downloaded_file.exists():
+        raise RuntimeError(f"Không thể tải âm thanh lúc này: {last_error or 'Lỗi trích xuất audio'}") from last_error
+
+    ffmpeg_path = _get_ffmpeg_path()
+    title = info.get("title") or downloaded_file.stem
+    clean_title = sanitize_filename(title)
+    
+    real_u_date = upload_date or str(info.get("upload_date") or "")
+    date_prefix = f"[{real_u_date[:4]}-{real_u_date[4:6]}-{real_u_date[6:]}]_" if real_u_date and len(real_u_date) == 8 else ""
+
+    target_mp3 = output_dir_path / f"{date_prefix}{clean_title}.mp3"
+
+    if downloaded_file.suffix.lower() == ".mp3":
+        if downloaded_file != target_mp3:
             try:
-                with yt_dlp.YoutubeDL(options) as downloader:
-                    info = downloader.extract_info(candidate_url, download=True)
-                    if info:
-                        prepared_filename = downloader.prepare_filename(info)
-                        temp_file = Path(prepared_filename)
-                        thumbnail_url = info.get("thumbnail")
-                        author_name = info.get("uploader") or info.get("uploader_id") or "TikTok Creator"
-                        break
-            except Exception as exc:
-                last_error = exc
-                continue
+                if target_mp3.exists():
+                    target_mp3.unlink()
+                downloaded_file.rename(target_mp3)
+            except Exception:
+                pass
+        final_path = target_mp3 if target_mp3.exists() else downloaded_file
+    elif ffmpeg_path and convert_video_to_mp3(downloaded_file, target_mp3):
+        try:
+            if downloaded_file != target_mp3 and downloaded_file.exists():
+                downloaded_file.unlink()
+        except Exception:
+            pass
+        final_path = target_mp3
+    else:
+        raise RuntimeError("Cần FFmpeg để trích xuất tệp âm thanh MP3 chuẩn. Vui lòng kiểm tra cài đặt FFmpeg.")
 
-        if not info or not temp_file:
-            raise RuntimeError(f"Không thể tải âm thanh lúc này: {last_error or 'Lỗi trích xuất audio'}") from last_error
-
-        # Tìm tệp âm thanh trong thư mục tạm
-        audio_file = None
-        for ext in [".mp3", ".m4a", ".aac", ".wav"]:
-            variant = temp_file.with_suffix(ext)
-            if variant.exists():
-                audio_file = variant
-                break
-
-        if not audio_file or not audio_file.exists():
-            audio_file = locate_downloaded_file(temp_dir, info.get("title"))
-
-        if not audio_file or not audio_file.exists():
-            mp4_candidate = temp_file.with_suffix(".mp4")
-            if not mp4_candidate.exists():
-                mp4_candidate = locate_downloaded_file(temp_dir)
-            if mp4_candidate and mp4_candidate.exists():
-                audio_file = mp4_candidate
-
-        if not audio_file or not audio_file.exists():
-            raise RuntimeError("Không thể tạo hoặc trích xuất tệp âm thanh.")
-
-        title = info.get("title") or audio_file.stem
-        clean_title = sanitize_filename(title)
-        
-        real_u_date = upload_date or str(info.get("upload_date") or "")
-        date_prefix = f"[{real_u_date[:4]}-{real_u_date[4:6]}-{real_u_date[6:]}]_" if real_u_date and len(real_u_date) == 8 else ""
-
-        target_ext = audio_file.suffix if audio_file.suffix.lower() != ".mp4" else ".m4a"
-        target_path = output_dir_path / f"{date_prefix}{clean_title}{target_ext}"
-
-        shutil.copy2(audio_file, target_path)
-
-        # Tự động nhúng ID3 Metadata & Cover Art cho MP3
-        if target_path.suffix.lower() == ".mp3":
-            embed_mp3_metadata(str(target_path), title, author_name, thumbnail_url)
+    embed_mp3_metadata(str(final_path), title, author_name, thumbnail_url)
 
     return {
         "title": title or f"{platform}_audio",
-        "output_path": str(target_path),
-        "file_name": target_path.name,
+        "output_path": str(final_path),
+        "file_name": final_path.name,
         "platform": platform,
     }
 
@@ -638,8 +755,14 @@ def locate_downloaded_file(output_dir: str, expected_title: Optional[str] = None
 
     candidates = [
         p for p in output_path.iterdir()
-        if p.is_file() and p.suffix.lower() in {".mp4", ".m4a", ".webm", ".mp3", ".aac"}
+        if p.is_file() and not p.name.endswith(".part") and p.suffix.lower() in {".mp4", ".m4a", ".webm", ".mp3", ".aac", ".unknown_video", ".mpv"}
     ]
+    if not candidates:
+        candidates = [
+            p for p in output_path.iterdir()
+            if p.is_file() and not p.name.endswith(".part")
+        ]
+
     if not candidates:
         return None
 
@@ -687,7 +810,7 @@ def remove_watermark(input_path: Path, output_dir: str) -> Path:
 
     output_path = Path(output_dir).expanduser().resolve() / f"{input_path.stem}_clean.mp4"
     command = build_watermark_removal_command(input_path, output_path, ffmpeg_executable=ffmpeg_path)
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if completed.returncode != 0:
         raise RuntimeError(f"Không thể xử lý watermark. Chi tiết: {completed.stderr.strip() or completed.stdout.strip()}")
 
@@ -796,6 +919,11 @@ def download_video(
         try:
             cleaned_file = remove_watermark(downloaded_file, str(output_dir_path))
             if cleaned_file and cleaned_file.exists():
+                try:
+                    if downloaded_file != cleaned_file and downloaded_file.exists():
+                        downloaded_file.unlink()
+                except Exception:
+                    pass
                 final_file = cleaned_file
         except Exception:
             final_file = downloaded_file

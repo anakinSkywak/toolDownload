@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "computedHash": "79fec75eb8cb46ec4d5e119a08d5366dfe2f1b56d876b2ea5633fa80f8aa1f7c"
+    },
+    "caveman": {
+      "source": "JuliusBrussee/caveman",
+      "sourceType": "github",
+      "skillPath": "skills/caveman/SKILL.md",
+      "computedHash": "723fb2a8bec1156c0f0b5bf020cc739ed09702b7726ec6377480038871339f6e"
+    },
+    "executing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/executing-plans/SKILL.md",
+      "computedHash": "78a07800ee99a5861ae10be59d79fad085fdca10444e8aaeb2691597e357cff8"
+    },
+    "ponytail": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "computedHash": "9e8d05cbbaf6dc38f0cffc924c09b3cbe76d94ba4ba0d09bde803da2f8c6b5a0"
+    },
+    "ponytail-audit": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail-audit/SKILL.md",
+      "computedHash": "0406899b920175367e43ca6bf3c2e5b9ba676a9bcf1fe35b57dc75fd15cfa1e2"
+    },
+    "ponytail-review": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail-review/SKILL.md",
+      "computedHash": "d68b62a2fb83972ca8a9f7f20851baf6563bb7908bc81002214c6c1141486c25"
+    },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/systematic-debugging/SKILL.md",
+      "computedHash": "a2750dfbaed1690da73b120254892c4f926b4576cb82eb16fc877783941fe39b"
+    },
+    "verification-before-completion": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/verification-before-completion/SKILL.md",
+      "computedHash": "b529822bdac4b197b180fe12225cff86b930b65910435103c10622df7f041651"
+    },
+    "writing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/writing-plans/SKILL.md",
+      "computedHash": "a8a8b0d07b744173079b25d26c6a189a0b5e7ddd80444ce92055b974dab7352b"
+    }
+  }
+}

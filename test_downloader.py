@@ -30,6 +30,7 @@ def test_build_audio_download_options() -> None:
     options = build_audio_download_options("/tmp/out", title="demo", quality="best", platform="tiktok")
 
     assert options["format"] == "bestaudio/best"
+    assert "/tmp/out" in options["outtmpl"] or r"\tmp\out" in options["outtmpl"]
     if _get_ffmpeg_path():
         assert options["postprocessors"][0]["key"] == "FFmpegExtractAudio"
         assert options["postprocessors"][0]["preferredcodec"] == "mp3"
@@ -37,14 +38,21 @@ def test_build_audio_download_options() -> None:
         assert options["postprocessors"] == []
 
 
+
 def test_build_video_download_options() -> None:
     options = build_video_download_options("/tmp/out", title="demo", quality="best", platform="tiktok")
 
-    assert options["format"] == "bestvideo+bestaudio/best[ext=mp4]/best"
+    assert options["format"] == "best[ext=mp4]/bestvideo+bestaudio/best"
     if _get_ffmpeg_path():
         assert options["postprocessors"][0]["key"] == "FFmpegVideoConvertor"
     else:
         assert options["postprocessors"] == []
+
+
+def test_get_ffmpeg_path_returns_executable() -> None:
+    path = _get_ffmpeg_path()
+    if path:
+        assert Path(path).exists()
 
 
 def test_tiktok_options_use_android_headers_and_client() -> None:

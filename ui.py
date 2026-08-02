@@ -8,7 +8,9 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Optional
@@ -59,6 +61,7 @@ class TikTokDownloaderApp:
         self.default_output_dir = str(Path.home() / "Downloads" / "TikTok")
 
         self.output_var = tk.StringVar(value=self._load_saved_output_dir())
+        self.community_url_var = tk.StringVar(value=self._load_saved_community_url())
         self.url_var = tk.StringVar()
         self.platform_var = tk.StringVar(value="TikTok")
         self.quality_var = tk.StringVar(value="best")
@@ -94,10 +97,13 @@ class TikTokDownloaderApp:
         header_frame.pack(fill="x", pady=(0, 10))
 
         title_row = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_row.pack(anchor="w")
+        title_row.pack(fill="x")
+
+        title_left = ctk.CTkFrame(title_row, fg_color="transparent")
+        title_left.pack(side="left")
 
         title_label = ctk.CTkLabel(
-            title_row,
+            title_left,
             text="⚡ TikTok & Douyin Downloader",
             font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
             text_color="#f8fafc",
@@ -105,7 +111,7 @@ class TikTokDownloaderApp:
         title_label.pack(side="left")
 
         badge = ctk.CTkLabel(
-            title_row,
+            title_left,
             text=" PRO ver 1.0 by Delwynaa ",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#ff0050",
@@ -113,6 +119,20 @@ class TikTokDownloaderApp:
             corner_radius=8,
         )
         badge.pack(side="left", padx=10)
+
+        # NÚT CỘNG ĐỒNG CỦA DELWYNAA
+        btn_community = ctk.CTkButton(
+            title_row,
+            text="💬 Tham Gia Cộng Đồng",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            height=34,
+            corner_radius=10,
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            text_color="#ffffff",
+            command=self.open_community_link,
+        )
+        btn_community.pack(side="right")
 
         subtitle_label = ctk.CTkLabel(
             header_frame,
@@ -185,7 +205,7 @@ class TikTokDownloaderApp:
         )
         self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        btn_preview = ctk.CTkButton(
+        self.btn_preview = ctk.CTkButton(
             url_input_row,
             text="🔍 Xem Trước",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
@@ -197,7 +217,7 @@ class TikTokDownloaderApp:
             text_color="#ffffff",
             command=self.load_preview,
         )
-        btn_preview.pack(side="right")
+        self.btn_preview.pack(side="right")
 
         # Khung tải hàng loạt / Tải kênh (Ẩn mặc định)
         self.frame_batch = ctk.CTkFrame(self.card_input, fg_color="transparent")
@@ -291,6 +311,8 @@ class TikTokDownloaderApp:
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#f8fafc",
             anchor="w",
+            justify="left",
+            wraplength=480,
         )
         self.lbl_prev_title.pack(anchor="w", fill="x")
 
@@ -464,7 +486,22 @@ class TikTokDownloaderApp:
         )
         self.lbl_status.pack(fill="x", padx=12, pady=6)
 
-        self.root.bind("<Return>", lambda event: self.start_download())
+        self.root.bind("<Return>", self._on_return_key)
+
+    def _on_return_key(self, event: tk.Event) -> None:
+        focused = self.root.focus_get()
+        if focused and isinstance(focused, (ctk.CTkTextbox, tk.Text)):
+            return
+        self.start_download()
+
+    def open_community_link(self) -> None:
+        """Mở trang/nhóm Cộng Đồng trên trình duyệt web mặc định của hệ thống."""
+        url = self.community_url_var.get().strip() or "https://zalo.me"
+        try:
+            webbrowser.open(url)
+            self.status_var.set("🌐 Đã mở liên kết Cộng Đồng trên trình duyệt!")
+        except Exception as exc:
+            messagebox.showerror("Lỗi mở liên kết", str(exc))
 
     def _on_input_mode_change(self, value: str) -> None:
         if "Kênh" in value or "Batch" in value:
@@ -530,6 +567,7 @@ class TikTokDownloaderApp:
             messagebox.showwarning("Thiếu thông tin", "Vui lòng dán liên kết video TikTok/Douyin trước.")
             return
 
+        self.btn_preview.configure(state="disabled", text="⏳ Đang Xem...")
         self.status_var.set("🔍 Đang tải thông tin xem trước...")
         thread = threading.Thread(target=self._preview_worker, args=(url,), daemon=True)
         thread.start()
@@ -537,9 +575,19 @@ class TikTokDownloaderApp:
     def _preview_worker(self, url: str) -> None:
         try:
             preview_data = fetch_video_preview(url, platform_choice=self.platform_var.get())
+            raw_img = None
+            if preview_data.get("thumbnail_url"):
+                try:
+                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                    req = urllib.request.Request(preview_data["thumbnail_url"], headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        raw_img = Image.open(io.BytesIO(resp.read()))
+                except Exception:
+                    pass
+            preview_data["pil_image"] = raw_img
             self.msg_queue.put(("preview", preview_data))
         except Exception as exc:
-            self.msg_queue.put(("status", f"⚠️ Không thể xem trước: {exc}"))
+            self.msg_queue.put(("preview_error", str(exc)))
 
     def _process_queue(self) -> None:
         try:
@@ -550,29 +598,30 @@ class TikTokDownloaderApp:
                 elif msg_type == "progress":
                     val = max(0.0, min(1.0, float(data) / 100.0))
                     self.progress_bar.set(val)
+                elif msg_type == "preview_error":
+                    self.btn_preview.configure(state="normal", text="🔍 Xem Trước")
+                    self.status_var.set(f"⚠️ Không thể xem trước: {data}")
                 elif msg_type == "preview":
+                    self.btn_preview.configure(state="normal", text="🔍 Xem Trước")
                     info = data
                     self.lbl_prev_title.configure(text=info.get("title", "Video TikTok"))
                     self.lbl_prev_author.configure(text=f"👤 Tác giả: {info.get('author', 'Creator')}")
                     self.card_preview.pack(fill="x", pady=(0, 10), ipadx=6, ipady=4)
 
-                    if info.get("thumbnail_url"):
+                    raw_img = info.get("pil_image")
+                    if raw_img:
                         try:
-                            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-                            req = urllib.request.Request(info["thumbnail_url"], headers=headers)
-                            with urllib.request.urlopen(req, timeout=5) as resp:
-                                raw_img = Image.open(io.BytesIO(resp.read()))
-                                orig_w, orig_h = raw_img.size
-                                if orig_w > 0 and orig_h > 0:
-                                    max_w, max_h = 130, 150
-                                    ratio = min(max_w / orig_w, max_h / orig_h)
-                                    new_w = max(1, int(orig_w * ratio))
-                                    new_h = max(1, int(orig_h * ratio))
-                                else:
-                                    new_w, new_h = 110, 140
+                            orig_w, orig_h = raw_img.size
+                            if orig_w > 0 and orig_h > 0:
+                                max_w, max_h = 130, 150
+                                ratio = min(max_w / orig_w, max_h / orig_h)
+                                new_w = max(1, int(orig_w * ratio))
+                                new_h = max(1, int(orig_h * ratio))
+                            else:
+                                new_w, new_h = 110, 140
 
-                                ctk_img = ctk.CTkImage(light_image=raw_img, dark_image=raw_img, size=(new_w, new_h))
-                                self.img_label.configure(image=ctk_img, text="", width=new_w, height=new_h)
+                            ctk_img = ctk.CTkImage(light_image=raw_img, dark_image=raw_img, size=(new_w, new_h))
+                            self.img_label.configure(image=ctk_img, text="", width=new_w, height=new_h)
                         except Exception:
                             pass
                     self.status_var.set("✅ Đã trích xuất thông tin xem trước!")
@@ -636,11 +685,27 @@ class TikTokDownloaderApp:
             return self.default_output_dir
         return self.default_output_dir
 
-    def _save_output_dir(self) -> None:
+    def _load_saved_community_url(self) -> str:
+        default_url = "https://zalo.me"
+        if not self.config_path.exists():
+            return default_url
+        try:
+            with self.config_path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+            if isinstance(data, dict) and data.get("community_url"):
+                return str(data["community_url"])
+        except (json.JSONDecodeError, OSError):
+            return default_url
+        return default_url
+
+    def _save_config(self) -> None:
         try:
             with self.config_path.open("w", encoding="utf-8") as file:
                 json.dump(
-                    {"output_dir": self.output_var.get().strip() or self.default_output_dir},
+                    {
+                        "output_dir": self.output_var.get().strip() or self.default_output_dir,
+                        "community_url": self.community_url_var.get().strip() or "https://zalo.me",
+                    },
                     file,
                     ensure_ascii=False,
                     indent=2,
@@ -652,7 +717,7 @@ class TikTokDownloaderApp:
         directory = filedialog.askdirectory(title="Chọn thư mục lưu video")
         if directory:
             self.output_var.set(directory)
-            self._save_output_dir()
+            self._save_config()
 
     def clear_fields(self) -> None:
         self.url_var.set("")
@@ -660,12 +725,14 @@ class TikTokDownloaderApp:
         self.output_var.set(str(Path.home() / "Downloads" / "TikTok"))
         self.download_mode_var.set("video")
         self.seg_mode.set("🎬 Video")
+        self.quality_var.set("best")
+        self.opt_quality.set("best (Gốc cao nhất)")
         self.progress_bar.set(0.0)
         self.card_preview.pack_forget()
         self.status_var.set("⚡ Sẵn sàng tải video hoặc âm thanh")
 
     def on_close(self) -> None:
-        self._save_output_dir()
+        self._save_config()
         self.root.destroy()
 
     def start_download(self) -> None:

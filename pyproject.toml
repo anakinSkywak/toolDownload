@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [project.scripts]
-tiktok-downloader = "app:run"
+tiktok-downloader = "ui:run"
